@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from io import StringIO
-import plotly.express as px
 import plotly.graph_objs as go
 import re
 
