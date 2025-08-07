@@ -10,10 +10,10 @@ import re
 from datetime import datetime
 
 # -------------------------------
-# Title
+# App Title
 # -------------------------------
 st.title("📊 LOWESS + RSI Dashboard")
-st.write("Analyze price trend and RSI over a continuous date range (full timeline)")
+st.write("Analyze price trend and momentum across a date range")
 
 # -------------------------------
 # Load and Clean Data
@@ -27,12 +27,14 @@ def load_data():
         st.error("❌ 'Latest file.csv' not found. Upload it to the same folder.")
         return None
 
-    # Extract rows using regex
+    # Extract rows using regex: dd-dd-dddd,hh:mm:ss,...
     lines = re.findall(r'\d{2}-\d{2}-\d{4},\d{2}:\d{2}:\d{2},[\d.,]+', content)
+    
     if not lines:
-        st.error("❌ No valid data found. Check file format.")
+        st.error("❌ No valid data found. Check if the file has correct format.")
         return None
 
+    # Convert to DataFrame
     df = pd.read_csv(StringIO('\n'.join(lines)), header=None)
     df.columns = [
         'date', 'time',
@@ -44,9 +46,9 @@ def load_data():
     df['close'] = pd.to_numeric(df['close'], errors='coerce')
     df.dropna(subset=['close'], inplace=True)
 
-    # Create full Datetime
+    # Create full datetime
     df['Datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'], format='%d-%m-%Y %H:%M:%S')
-    df['Date'] = df['Datetime'].dt.date
+    df['Date'] = df['Datetime'].dt.date  # For filtering
 
     return df
 
@@ -70,22 +72,20 @@ if from_date > to_date:
     st.error("❌ 'From Date' cannot be after 'To Date'")
     st.stop()
 
-# Convert to datetime for filtering
+# Filter data
 from_dt = pd.Timestamp(from_date)
 to_dt = pd.Timestamp(to_date) + pd.Timedelta(days=1)  # Include full end date
 
-# Filter data
 mask = (df['Datetime'] >= from_dt) & (df['Datetime'] < to_dt)
-df_filtered = df[mask]
+df_filtered = df[mask].copy()
 
 if df_filtered.empty:
     st.warning(f"⚠️ No data found between {from_date} and {to_date}")
     st.stop()
 
-st.write(f"📈 Showing data from **{from_date}** to **{to_date}**")
-
-# Sort by datetime
 df_filtered.sort_values('Datetime', inplace=True)
+
+st.write(f"📈 Showing data from **{from_date}** to **{to_date}**")
 
 # -------------------------------
 # Calculate RSI (14-period)
@@ -113,7 +113,7 @@ df_filtered['Lower_Band_1'] = df_filtered['LOWESS'] - 1.0 * rolling_std
 df_filtered['Lower_Band_2'] = df_filtered['LOWESS'] - 2.0 * rolling_std
 
 # -------------------------------
-# Plot Charts
+# Plot Charts (Larger Size)
 # -------------------------------
 
 # Price + LOWESS
@@ -129,9 +129,10 @@ fig1.update_layout(
     title=f"Price & LOWESS Channel ({from_date} to {to_date})",
     xaxis_title="Date & Time",
     yaxis_title="Price",
-    hovermode='x unified'
+    hovermode='x unified',
+    height=600  # Taller chart
 )
-st.plotly_chart(fig1)
+st.plotly_chart(fig1, use_container_width=True)
 
 # RSI
 fig2 = go.Figure()
@@ -143,6 +144,7 @@ fig2.update_layout(
     title="RSI (14)",
     xaxis_title="Date & Time",
     yaxis_title="RSI",
-    hovermode='x unified'
+    hovermode='x unified',
+    height=500  # Taller chart
 )
-st.plotly_chart(fig2)
+st.plotly_chart(fig2, use_container_width=True)
