@@ -4,6 +4,7 @@ import numpy as np
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from io import StringIO
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import re
 
 # -------------------------------
@@ -26,10 +27,10 @@ def load_data():
         with open('Latest file.csv', 'r', encoding='latin1', errors='ignore') as f:
             content = f.read()
     except FileNotFoundError:
-        st.error("❌ 'Latest file.csv' not found. Upload it to the same folder.")
+        st.error("❌ 'Latest file.csv' not found.")
         return None
 
-    # Match rows with all columns
+    # Match rows with all 11 columns
     lines = re.findall(r'\d{2}-\d{2}-\d{4},\d{2}:\d{2}:\d{2}(?:,[\d.]+){9}', content)
     if not lines:
         st.error("❌ No valid data found. Check file format.")
@@ -45,7 +46,6 @@ def load_data():
     df['close'] = pd.to_numeric(df['close'], errors='coerce')
     df.dropna(subset=['close'], inplace=True)
     df['Datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'], format='%d-%m-%Y %H:%M:%S')
-    df['Date'] = df['Datetime'].dt.date
     return df
 
 df = load_data()
@@ -76,10 +76,8 @@ if df_filtered.empty:
 
 df_filtered.sort_values('Datetime', inplace=True)
 
-st.markdown(
-    f"<p style='text-align: center; font-size: 16px;'>📈 Showing data from <strong>{from_date}</strong> to <strong>{to_date}</strong></p>",
-    unsafe_allow_html=True
-)
+# Convert Datetime to string for category x-axis (removes gaps)
+df_filtered['TimeLabel'] = df_filtered['Datetime'].dt.strftime('%Y-%m-%d %H:%M')
 
 # -------------------------------
 # RSI Calculation
@@ -107,12 +105,19 @@ df_filtered['Lower_Band_1'] = df_filtered['LOWESS'] - rolling_std
 df_filtered['Lower_Band_2'] = df_filtered['LOWESS'] - 2 * rolling_std
 
 # -------------------------------
-# Price + LOWESS Chart (TradingView style)
+# Combined Chart (Price + Volume + RSI)
 # -------------------------------
-fig = go.Figure()
+fig = make_subplots(
+    rows=3, cols=1,
+    shared_xaxes=True,
+    vertical_spacing=0.02,
+    row_heights=[0.65, 0.15, 0.2],
+    subplot_titles=(f"Price & LOWESS Channel ({from_date} to {to_date})", "Volume", "RSI (14)")
+)
 
+# --- Price Chart ---
 fig.add_trace(go.Candlestick(
-    x=df_filtered['Datetime'],
+    x=df_filtered['TimeLabel'],
     open=df_filtered['open'],
     high=df_filtered['high'],
     low=df_filtered['low'],
@@ -123,78 +128,58 @@ fig.add_trace(go.Candlestick(
     increasing_fillcolor='#26a69a',
     decreasing_fillcolor='#ef5350',
     opacity=0.9
-))
+), row=1, col=1)
+
+fig.add_trace(go.Scatter(x=df_filtered['TimeLabel'], y=df_filtered['LOWESS'],
+                         mode='lines', name='Trend', line=dict(color='#fdd835', width=2)), row=1, col=1)
+fig.add_trace(go.Scatter(x=df_filtered['TimeLabel'], y=df_filtered['Upper_Band_1'], mode='lines', name='U1', line=dict(color='#ef5350', width=1, dash='dot')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df_filtered['TimeLabel'], y=df_filtered['Upper_Band_2'], mode='lines', name='U2', line=dict(color='#ef5350', width=1, dash='dash')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df_filtered['TimeLabel'], y=df_filtered['Lower_Band_1'], mode='lines', name='L1', line=dict(color='#26a69a', width=1, dash='dot')), row=1, col=1)
+fig.add_trace(go.Scatter(x=df_filtered['TimeLabel'], y=df_filtered['Lower_Band_2'], mode='lines', name='L2', line=dict(color='#26a69a', width=1, dash='dash')), row=1, col=1)
+
+# --- Volume Bars ---
+fig.add_trace(go.Bar(
+    x=df_filtered['TimeLabel'],
+    y=df_filtered['Volume'],
+    name='Volume',
+    marker_color=np.where(df_filtered['close'] >= df_filtered['open'], '#26a69a', '#ef5350'),
+    opacity=0.6
+), row=2, col=1)
+
+# --- RSI Chart ---
 fig.add_trace(go.Scatter(
-    x=df_filtered['Datetime'], y=df_filtered['LOWESS'],
-    mode='lines', name='Trend', line=dict(color='#fdd835', width=2)
-))
-fig.add_trace(go.Scatter(x=df_filtered['Datetime'], y=df_filtered['Upper_Band_1'], mode='lines', name='U1', line=dict(color='#ef5350', width=1, dash='dot')))
-fig.add_trace(go.Scatter(x=df_filtered['Datetime'], y=df_filtered['Upper_Band_2'], mode='lines', name='U2', line=dict(color='#ef5350', width=1, dash='dash')))
-fig.add_trace(go.Scatter(x=df_filtered['Datetime'], y=df_filtered['Lower_Band_1'], mode='lines', name='L1', line=dict(color='#26a69a', width=1, dash='dot')))
-fig.add_trace(go.Scatter(x=df_filtered['Datetime'], y=df_filtered['Lower_Band_2'], mode='lines', name='L2', line=dict(color='#26a69a', width=1, dash='dash')))
-
-fig.update_layout(
-    title=f"Price & LOWESS Channel ({from_date} to {to_date})",
-    hovermode="x unified",
-    hoverlabel=dict(
-        bgcolor="rgba(0,0,0,0.8)",
-        font_size=12,
-        font_color="white",
-        align="left"
-    ),
-    height=700,
-    legend=dict(
-        orientation="h",
-        yanchor="bottom",
-        y=1.02,
-        xanchor="center",
-        x=0.5,
-        font=dict(size=12)
-    ),
-    xaxis_rangeslider_visible=False,
-    template="plotly_dark",
-    margin=dict(l=10, r=10, t=50, b=40),
-    uirevision='constant'
-)
-
-fig.update_xaxes(range=[df_filtered['Datetime'].iloc[0], df_filtered['Datetime'].iloc[-1]], type='date')
-
-st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True})
-
-# -------------------------------
-# RSI Chart (TradingView style)
-# -------------------------------
-fig_rsi = go.Figure()
-fig_rsi.add_trace(go.Scatter(
-    x=df_filtered['Datetime'], y=df_filtered['RSI'],
+    x=df_filtered['TimeLabel'], y=df_filtered['RSI'],
     mode='lines', name='RSI', line=dict(color='#ab47bc', width=2)
-))
-fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef5350", annotation_text="Overbought")
-fig_rsi.add_hline(y=30, line_dash="dash", line_color="#26a69a", annotation_text="Oversold")
+), row=3, col=1)
 
-fig_rsi.update_layout(
-    title="RSI (14)",
+fig.add_hline(y=70, line_dash="dash", line_color="#ef5350", annotation_text="Overbought", row=3, col=1)
+fig.add_hline(y=30, line_dash="dash", line_color="#26a69a", annotation_text="Oversold", row=3, col=1)
+
+# --- Layout ---
+fig.update_layout(
     hovermode="x unified",
     hoverlabel=dict(
-        bgcolor="rgba(0,0,0,0.8)",
+        bgcolor="rgba(0,0,0,0.85)",
         font_size=12,
         font_color="white",
         align="left"
     ),
-    height=300,
+    height=950,
     legend=dict(
         orientation="h",
-        yanchor="bottom",
-        y=1.02,
+        yanchor="top",
+        y=-0.15,
         xanchor="center",
         x=0.5,
         font=dict(size=12)
     ),
-    template="plotly_dark",
     margin=dict(l=10, r=10, t=50, b=40),
+    template="plotly_dark",
     uirevision='constant'
 )
 
-fig_rsi.update_xaxes(range=[df_filtered['Datetime'].iloc[0], df_filtered['Datetime'].iloc[-1]], type='date')
+# X-axis as category removes gaps
+fig.update_xaxes(type='category')
 
-st.plotly_chart(fig_rsi, use_container_width=True, config={"displayModeBar": True})
+# Show Chart
+st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True})
