@@ -1,486 +1,778 @@
-import streamlit as st
+def launch_multi_panel(self):
+        """Launch multi-panel chart with subcharts"""
+        if self.raw_data is None:
+            messagebox.showerror("Error", "No data available. Please check the CSV file.")
+            return
+            
+        timeframe = self.timeframe_var.get()
+        
+        # Get data for timeframe
+        data = self.get_timeframe_data(timeframe)
+        if data is None or len(data) == 0:
+            messagebox.showerror("Error", "No data available for selected timeframe.")
+            return
+            
+        self.log_message(f"Creating multi-panel chart for: {timeframe}")
+        
+        # Create main chart
+        chart = self.create_styled_chart(f"Multi-Panel Analysis - {timeframe}")
+        chart.set(data)
+        
+        # Add moving averages to main chart
+        if len(data) >= 20:
+            sma20 = chart.create_line('SMA 20', color='#FF6B6B', width=2)
+            sma20_data = self.calculate_sma(data, 20)
+            sma20.set(sma20_data)
+            
+        if len(data) >= 50:
+            sma50 = chart.create_line('SMA 50', color='#4ECDC4', width=2)
+            sma50_data = self.calculate_sma(data, 50)
+            sma50.set(sma50_data)
+        
+        # Add VWAP if selected
+        if self.indicator_vars['VWAP'].get():
+            vwap = chart.create_line('VWAP', color='#FFA726', width=2)
+            vwap_data = self.calculate_vwap(data)
+            vwap.set(vwap_data)
+        
+        # Create RSI subchart
+        if len(data) > 14:
+            rsi_chart = chart.create_subchart(width=1, height=0.3, sync_crosshairs=True)
+            rsi_chart.layout(background_color='#131722', text_color='#d1d4dc')
+            rsi_chart.price_scale(scale_margin_top=0.1, scale_margin_bottom=0.1)
+            
+            rsi_line = rsi_chart.create_line('RSI', color='#9C27B0', width=2)
+            rsi_data = self.calculate_rsi(data)
+            rsi_line.set(rsi_data)
+            
+            # Add RSI levels
+            rsi_chart.horizontal_line(70, color='#FF4444', width=1, style='dashed', text='Overbought')
+            rsi_chart.horizontal_line(30, color='#44FF44', width=1, style='dashed', text='Oversold')
+            rsi_chart.horizontal_line(50, color='#FFFF44', width=1, style='dotted', text='Midline')
+        
+        # Create MACD subchart
+        if len(data) > 26:
+            macd_chart = chart.create_subchart(width=1, height=0.3, sync_crosshairs=True)
+            macd_chart.layout(background_color='#131722', text_color='#d1d4dc')
+            
+            macd_data = self.calculate_macd(data)
+            
+            macd_line = macd_chart.create_line('MACD', color='#2196F3', width=2)
+            macd_line.set(macd_data['macd'])
+            
+            signal_line = macd_chart.create_line('Signal', color='#FF9800', width=2)
+            signal_line.set(macd_data['signal'])
+            
+            histogram = macd_chart.create_histogram('Histogram', color='#9E9E9E')
+            histogram.set(macd_data['histogram'])
+            
+            # Zero line
+            macd_chart.horizontal_line(0, color='#666666', width=1, style='dotted')
+        
+        self.log_message(f"Multi-panel chart launched for {timeframe}")
+        chart.show(block=False)
+        
+    def start_simulation(self):
+        """Start a simulation mode showing data progression"""
+        if self.raw_data is None:
+            messagebox.showerror("Error", "No data available. Please check the CSV file.")
+            return
+            
+        if self.is_running:
+            self.is_running = False
+            self.log_message("Stopping simulation...")
+            return
+            
+        self.is_running = True
+        self.log_message("Starting simulation mode...")
+        threading.Thread(target=self.run_simulation, daemon=True).start()
+        
+    def run_simulation(self):
+        """Run simulation showing data progression over time"""
+        try:
+            # Use last 1000 points for simulation
+            sim_data = self.raw_data.tail(1000).copy()
+            
+            # Create chart for simulation
+            chart = self.create_styled_chart("Live Simulation Mode")
+            
+            # Start with first 100 points
+            initial_data = sim_data.head(100)
+            chart.set(initial_data[['time', 'open', 'high', 'low', 'close', 'volume']])
+            
+            # Add SMA line
+            sma_line = chart.create_line('SMA 20', color='#FF6B6B', width=2)
+            
+            chart.show(block=False)
+            
+            self.log_message("Simulation started - showing data progression...")
+            
+            # Add remaining data points one by one
+            for i in range(100, len(sim_data)):
+                if not self.is_running:
+                    break
+                    
+                new_row = sim_data.iloc[i]
+                chart.update(new_row)
+                
+                # Update SMA every 20 points
+                if i % 20 == 0:
+                    current_data = sim_data.head(i + 1)
+                    sma_data = self.calculate_sma(current_data, 20)
+                    if len(sma_data) > 0:
+                        sma_line.set(sma_data)
+                
+                # Add markers for significant moves
+                if i > 0:
+                    prev_close = sim_data.iloc[i-1]['close']
+                    current_close = new_row['close']
+                    change_pct = ((current_close - prev_close) / prev_close) * 100
+                    
+                    if abs(change_pct) > 1:  # 1% movement
+                        color = '#00FF00' if change_pct > 0 else '#FF0000'
+                        position = 'above' if change_pct > 0 else 'below'
+                        chart.marker(
+                            time=datetime.fromtimestamp(new_row['time']),
+                            position=position,
+                            shape='circle',
+                            color=color,
+                            text=f'{change_pct:+.1f}%'
+                        )
+                
+                sleep(0.1)  # 100ms delay between updates
+                
+            self.log_message("Simulation completed!")
+            self.is_running = False
+            
+        except Exception as e:
+            self.log_message(f"Simulation error: {str(e)}")
+            self.is_running = False#!/usr/bin/env python3
+"""
+Lightweight Charts Python Dashboard
+A comprehensive financial dashboard using the lightweight-charts-python library
+Data Source: Custom CSV file with 5-minute OHLC data
+"""
+
 import pandas as pd
 import numpy as np
-from io import StringIO
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
+from time import sleep
+from lightweight_charts import Chart
+import threading
+import tkinter as tk
+from tkinter import ttk, messagebox
+import queue
+import os
 
-# -------------------------------
-# Page Config
-# -------------------------------
-st.set_page_config(
-    page_title="TradingView",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# -------------------------------
-# Exact TradingView CSS Styling
-# -------------------------------
-st.markdown("""
-<style>
-    /* Complete TradingView dark theme */
-    .stApp {
-        background-color: #0D1421;
-    }
-    
-    .main .block-container {
-        padding: 0;
-        background-color: #0D1421;
-        max-width: 100%;
-    }
-    
-    /* TradingView top toolbar */
-    .tv-toolbar {
-        background: #1E2329;
-        height: 48px;
-        display: flex;
-        align-items: center;
-        padding: 0 16px;
-        border-bottom: 1px solid #2B3139;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        gap: 16px;
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-    }
-    
-    .tv-symbol-info {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-    
-    .tv-symbol {
-        background: #2962FF;
-        color: white;
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-weight: 600;
-        font-size: 14px;
-        letter-spacing: 0.5px;
-    }
-    
-    .tv-price {
-        color: #FFFFFF;
-        font-size: 18px;
-        font-weight: 700;
-        margin-right: 8px;
-    }
-    
-    .tv-change {
-        font-size: 14px;
-        font-weight: 600;
-        padding: 4px 8px;
-        border-radius: 4px;
-    }
-    
-    .tv-change.positive {
-        color: #02C076;
-        background: rgba(2, 192, 118, 0.1);
-    }
-    
-    .tv-change.negative {
-        color: #FF4976;
-        background: rgba(255, 73, 118, 0.1);
-    }
-    
-    .tv-timeframes {
-        display: flex;
-        gap: 4px;
-        margin-left: auto;
-        margin-right: 16px;
-    }
-    
-    .tv-timeframe {
-        background: transparent;
-        color: #B2B5BE;
-        padding: 6px 12px;
-        border-radius: 4px;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        border: 1px solid transparent;
-    }
-    
-    .tv-timeframe.active {
-        background: #2962FF;
-        color: white;
-    }
-    
-    .tv-timeframe:hover {
-        background: rgba(41, 98, 255, 0.1);
-        color: #2962FF;
-    }
-    
-    .tv-time {
-        color: #B2B5BE;
-        font-size: 13px;
-        font-weight: 500;
-    }
-    
-    /* Chart container */
-    .tv-chart-container {
-        background: #0D1421;
-        height: calc(100vh - 120px);
-        position: relative;
-    }
-    
-    .stPlotlyChart {
-        background: #0D1421 !important;
-    }
-    
-    /* Hide Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stDeployButton {display: none;}
-    
-    /* Sidebar styling */
-    .css-1d391kg {
-        background: #1E2329;
-        border-right: 1px solid #2B3139;
-    }
-    
-    /* Remove all default spacing */
-    .element-container {
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    
-    div[data-testid="stVerticalBlock"] > div {
-        gap: 0;
-    }
-    
-    /* Volume and indicators text colors */
-    .tv-volume-label {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        color: #B2B5BE;
-        font-size: 12px;
-        font-weight: 600;
-        z-index: 1000;
-    }
-    
-    /* Price labels on right */
-    .tv-price-labels {
-        position: absolute;
-        right: 8px;
-        top: 50%;
-        transform: translateY(-50%);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-    
-    .tv-price-label {
-        background: rgba(255, 255, 255, 0.1);
-        color: #FFFFFF;
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-size: 11px;
-        font-weight: 600;
-        backdrop-filter: blur(10px);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# -------------------------------
-# Data Loading Functions
-# -------------------------------
-@st.cache_data
-def load_data(uploaded_file=None):
-    try:
-        if uploaded_file is not None:
-            content = str(uploaded_file.read(), 'latin1')
-            df = pd.read_csv(StringIO(content), header=None, encoding='latin1', on_bad_lines='skip')
-        else:
-            try:
-                df = pd.read_csv('Latest file.csv', header=None, encoding='latin1', on_bad_lines='skip')
-            except FileNotFoundError:
-                return generate_realistic_data()
+class FinancialDashboard:
+    def __init__(self, csv_file='Latest file 1.csv'):
+        self.csv_file = csv_file
+        self.charts = {}
+        self.data_queue = queue.Queue()
+        self.is_running = False
+        self.raw_data = None
         
-        if df.shape[1] >= 7:
-            df.columns = ['date', 'time', 'open', 'high', 'low', 'close', 'Volume'] + \
-                        [f'col_{i}' for i in range(7, df.shape[1])]
-        else:
-            return generate_realistic_data()
-            
-        for col in ['open', 'high', 'low', 'close', 'Volume']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+        # Available timeframes based on 5-minute data
+        self.timeframes = {
+            '1 Day': 288,      # 288 * 5min = 1 day
+            '3 Days': 864,     # 3 days
+            '1 Week': 2016,    # 7 days
+            '2 Weeks': 4032,   # 14 days
+            '1 Month': 8640,   # 30 days
+            '3 Months': 25920, # 90 days
+            '6 Months': 51840, # 180 days
+            '1 Year': 103680,  # 360 days
+            'All Data': -1     # All available data
+        }
+        self.current_timeframe = '1 Month'
         
-        df = df.dropna(subset=['close'])
-        df = df[df['close'] > 0]
+        # Technical indicators
+        self.indicators = {
+            'SMA_20': True,
+            'SMA_50': True,
+            'EMA_12': False,
+            'EMA_26': False,
+            'RSI': False,
+            'MACD': False,
+            'Bollinger_Bands': False,
+            'VWAP': False
+        }
         
+        # Load and prepare data
+        self.load_data()
+    def load_data(self):
+        """Load and prepare data from CSV file"""
         try:
-            df['Datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
-        except:
-            return generate_realistic_data()
+            if not os.path.exists(self.csv_file):
+                messagebox.showerror("Error", f"CSV file '{self.csv_file}' not found!")
+                return False
+                
+            self.log_message(f"Loading data from {self.csv_file}...")
+            
+            # Read CSV file
+            self.raw_data = pd.read_csv(self.csv_file)
+            
+            # Convert date and time to datetime
+            self.raw_data['datetime'] = pd.to_datetime(
+                self.raw_data['date'] + ' ' + self.raw_data['time'], 
+                format='%d-%m-%Y %H:%M:%S'
+            )
+            
+            # Convert to Unix timestamp for lightweight charts
+            self.raw_data['time'] = self.raw_data['datetime'].astype('int64') // 10**9
+            
+            # Rename columns to match lightweight charts format
+            column_mapping = {
+                'Volume': 'volume',
+                'open': 'open',
+                'high': 'high', 
+                'low': 'low',
+                'close': 'close'
+            }
+            self.raw_data.rename(columns=column_mapping, inplace=True)
+            
+            # Sort by datetime
+            self.raw_data.sort_values('datetime', inplace=True)
+            self.raw_data.reset_index(drop=True, inplace=True)
+            
+            # Get data info
+            start_date = self.raw_data['datetime'].min()
+            end_date = self.raw_data['datetime'].max()
+            total_points = len(self.raw_data)
+            
+            self.log_message(f"Data loaded successfully!")
+            self.log_message(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            self.log_message(f"Total data points: {total_points:,}")
+            self.log_message(f"Frequency: 5-minute intervals")
+            
+            return True
+            
+        except Exception as e:
+            self.log_message(f"Error loading data: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load data: {str(e)}")
+            return False
         
-        return df.sort_values('Datetime').reset_index(drop=True)
+    def setup_gui(self):
+        """Setup the main GUI interface"""
+        self.root = tk.Tk()
+        self.root.title("Lightweight Charts Financial Dashboard - Custom Data")
+        self.root.geometry("1200x800")
         
-    except:
-        return generate_realistic_data()
-
-def generate_realistic_data():
-    """Generate realistic AAPL-style data"""
-    np.random.seed(42)
-    n_points = 500
-    base_price = 185
-    
-    # Generate dates (6 months of hourly data)
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=180)
-    dates = pd.date_range(start=start_date, end=end_date, freq='1H')
-    dates = dates[:n_points]
-    
-    # Create realistic price movement with volatility
-    returns = np.random.normal(0.0002, 0.02, n_points)  # Realistic daily returns
-    trend = np.linspace(0, 0.1, n_points)  # Slight upward trend
-    volatility_clusters = np.abs(np.random.normal(0, 0.01, n_points))
-    
-    # Generate price series
-    log_prices = np.log(base_price) + np.cumsum(returns + trend/n_points)
-    prices = np.exp(log_prices)
-    
-    data = []
-    for i in range(n_points):
-        base = prices[i]
+        # Create main frame
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Generate realistic OHLC
-        volatility = volatility_clusters[i] * base
+        # Control panel
+        control_frame = ttk.LabelFrame(main_frame, text="Dashboard Controls", padding=10)
+        control_frame.pack(fill=tk.X, pady=(0, 10))
         
-        open_price = base + np.random.normal(0, volatility * 0.3)
-        close_price = base + np.random.normal(0, volatility * 0.3)
+        # Data source info
+        ttk.Label(control_frame, text="Data Source:").grid(row=0, column=0, padx=5, sticky='w')
+        ttk.Label(control_frame, text=self.csv_file, font=('Arial', 9, 'bold')).grid(row=0, column=1, padx=5, sticky='w')
         
-        high_price = max(open_price, close_price) + abs(np.random.normal(0, volatility * 0.5))
-        low_price = min(open_price, close_price) - abs(np.random.normal(0, volatility * 0.5))
+        # Timeframe selection
+        ttk.Label(control_frame, text="Timeframe:").grid(row=0, column=2, padx=5, sticky='w')
+        self.timeframe_var = tk.StringVar(value=self.current_timeframe)
+        timeframe_combo = ttk.Combobox(control_frame, textvariable=self.timeframe_var,
+                                      values=list(self.timeframes.keys()), width=12)
+        timeframe_combo.grid(row=0, column=3, padx=5)
+        timeframe_combo.bind('<<ComboboxSelected>>', self.on_timeframe_change)
         
-        # Realistic volume (higher on big moves)
-        price_change = abs(close_price - open_price) / open_price
-        base_volume = np.random.lognormal(15, 0.5)  # Log-normal distribution
-        volume_multiplier = 1 + price_change * 10
-        volume = int(base_volume * volume_multiplier)
+        # Buttons
+        ttk.Button(control_frame, text="Launch Chart", 
+                  command=self.launch_chart).grid(row=0, column=4, padx=10)
+        ttk.Button(control_frame, text="Multi-Panel View", 
+                  command=self.launch_multi_panel).grid(row=0, column=5, padx=5)
+        ttk.Button(control_frame, text="Simulation Mode", 
+                  command=self.start_simulation).grid(row=0, column=6, padx=5)
         
-        data.append({
-            'Datetime': dates[i],
-            'date': dates[i].strftime('%d-%m-%Y'),
-            'time': dates[i].strftime('%H:%M:%S'),
-            'open': round(open_price, 2),
-            'high': round(high_price, 2),
-            'low': round(low_price, 2),
-            'close': round(close_price, 2),
-            'Volume': volume
-        })
+        # Data range info
+        data_info_frame = ttk.LabelFrame(main_frame, text="Data Information", padding=10)
+        data_info_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        if self.raw_data is not None:
+            start_date = self.raw_data['datetime'].min().strftime('%Y-%m-%d %H:%M')
+            end_date = self.raw_data['datetime'].max().strftime('%Y-%m-%d %H:%M')
+            total_points = len(self.raw_data)
+            
+            ttk.Label(data_info_frame, text=f"Period: {start_date} to {end_date}").pack(anchor='w')
+            ttk.Label(data_info_frame, text=f"Total Points: {total_points:,} | Frequency: 5-minute intervals").pack(anchor='w')
+        
+        # Indicators panel
+        indicators_frame = ttk.LabelFrame(main_frame, text="Technical Indicators", padding=10)
+        indicators_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.indicator_vars = {}
+        row = 0
+        col = 0
+        for indicator, enabled in self.indicators.items():
+            var = tk.BooleanVar(value=enabled)
+            self.indicator_vars[indicator] = var
+            ttk.Checkbutton(indicators_frame, text=indicator.replace('_', ' '), 
+                           variable=var).grid(row=row, column=col, padx=10, sticky='w')
+            col += 1
+            if col > 3:  # 4 indicators per row
+                col = 0
+                row += 1
+        
+        # Status panel
+        status_frame = ttk.LabelFrame(main_frame, text="Dashboard Status", padding=10)
+        status_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.status_text = tk.Text(status_frame, height=15, width=80)
+        scrollbar = ttk.Scrollbar(status_frame, orient=tk.VERTICAL, command=self.status_text.yview)
+        self.status_text.configure(yscrollcommand=scrollbar.set)
+        
+        self.status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.log_message("Financial Dashboard initialized with custom data source")
+        if self.raw_data is not None:
+            self.log_message("Data loaded successfully - Ready to create charts!")
+        
+    def log_message(self, message):
+        """Add message to status log"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.status_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.status_text.see(tk.END)
+        self.root.update_idletasks()
+        
+    def get_timeframe_data(self, timeframe_key):
+        """Get data for specified timeframe"""
+        if self.raw_data is None:
+            return None
+            
+        periods = self.timeframes[timeframe_key]
+        
+        if periods == -1:  # All data
+            data = self.raw_data.copy()
+        else:
+            # Get the last N periods
+            data = self.raw_data.tail(periods).copy()
+            
+        # Select required columns for lightweight charts
+        required_cols = ['time', 'open', 'high', 'low', 'close', 'volume']
+        return data[required_cols].copy()
+            
+    def calculate_sma(self, data, period):
+        """Calculate Simple Moving Average"""
+        result = data.copy()
+        result['value'] = result['close'].rolling(window=period).mean()
+    def calculate_bollinger_bands(self, data, period=20, std_dev=2):
+        """Calculate Bollinger Bands"""
+        sma = data['close'].rolling(window=period).mean()
+        std = data['close'].rolling(window=period).std()
+        
+        upper_band = sma + (std * std_dev)
+        lower_band = sma - (std * std_dev)
+        
+        return {
+            'upper': pd.DataFrame({'time': data['time'], 'value': upper_band}).dropna(),
+            'middle': pd.DataFrame({'time': data['time'], 'value': sma}).dropna(),
+            'lower': pd.DataFrame({'time': data['time'], 'value': lower_band}).dropna()
+        }
+        
+    def calculate_vwap(self, data):
+        """Calculate Volume Weighted Average Price"""
+        # Handle zero volume data
+        volume = data['volume'].replace(0, 1)  # Replace 0 with 1 to avoid division by zero
+        
+        typical_price = (data['high'] + data['low'] + data['close']) / 3
+        cumulative_volume = volume.cumsum()
+        cumulative_tp_volume = (typical_price * volume).cumsum()
+        
+        vwap = cumulative_tp_volume / cumulative_volume
+        
+        return pd.DataFrame({'time': data['time'], 'value': vwap}).dropna()
+        
+    def calculate_ema(self, data, period):
+        """Calculate Exponential Moving Average"""
+        result = data.copy()
+        result['value'] = result['close'].ewm(span=period).mean()
+        return result[['time', 'value']].dropna()
+        
+    def calculate_rsi(self, data, period=14):
+        """Calculate Relative Strength Index"""
+        delta = data['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        result = data.copy()
+        result['value'] = rsi
+        return result[['time', 'value']].dropna()
+        
+    def calculate_macd(self, data, fast=12, slow=26, signal=9):
+        """Calculate MACD"""
+        ema_fast = data['close'].ewm(span=fast).mean()
+        ema_slow = data['close'].ewm(span=slow).mean()
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=signal).mean()
+        histogram = macd_line - signal_line
+        
+        result = data.copy()
+        result['macd'] = macd_line
+        result['signal'] = signal_line
+        result['histogram'] = histogram
+        
+        return {
+            'macd': result[['time', 'macd']].rename(columns={'macd': 'value'}).dropna(),
+            'signal': result[['time', 'signal']].rename(columns={'signal': 'value'}).dropna(),
+            'histogram': result[['time', 'histogram']].rename(columns={'histogram': 'value'}).dropna()
+        }
+        
+    def create_styled_chart(self, title="Financial Chart", toolbox=True):
+        """Create a styled chart with professional appearance"""
+        chart = Chart(toolbox=toolbox)
+        
+        # Professional dark theme
+        chart.layout(
+            background_color='#131722',
+            text_color='#d1d4dc',
+            font_size=12,
+            font_family='Trebuchet MS'
+        )
+        
+        # Candlestick styling
+        chart.candle_style(
+            up_color='#26a69a',
+            down_color='#ef5350',
+            border_up_color='#26a69a',
+            border_down_color='#ef5350',
+            wick_up_color='#26a69a',
+            wick_down_color='#ef5350'
+        )
+        
+        # Volume styling
+        chart.volume_config(
+            up_color='rgba(38, 166, 154, 0.7)',
+            down_color='rgba(239, 83, 80, 0.7)'
+        )
+        
+        # Crosshair
+        chart.crosshair(
+            mode='normal',
+            vert_color='#758696',
+            vert_style='dotted',
+            horz_color='#758696',
+            horz_style='dotted'
+        )
+        
+        # Watermark
+        chart.watermark(title, color='rgba(180, 180, 240, 0.3)')
+        
+        # Legend
+        chart.legend(visible=True, font_size=11)
+        
+        return chart
+        
+    def launch_chart(self):
+        """Launch the main chart window"""
+        if self.raw_data is None:
+            messagebox.showerror("Error", "No data available. Please check the CSV file.")
+            return
+            
+        timeframe = self.timeframe_var.get()
+        
+        # Get data for timeframe
+        data = self.get_timeframe_data(timeframe)
+        if data is None or len(data) == 0:
+            messagebox.showerror("Error", "No data available for selected timeframe.")
+            return
+            
+        self.log_message(f"Creating chart for timeframe: {timeframe}")
+        self.log_message(f"Data points: {len(data):,}")
+        
+        # Create chart
+        chart = self.create_styled_chart(f"Financial Data - {timeframe}")
+        chart.set(data)
+        
+        # Add technical indicators
+        indicators_added = []
+        
+        if self.indicator_vars['SMA_20'].get() and len(data) >= 20:
+            sma20 = chart.create_line('SMA 20', color='#FF6B6B', width=2)
+            sma20_data = self.calculate_sma(data, 20)
+            sma20.set(sma20_data)
+            indicators_added.append('SMA 20')
+            
+        if self.indicator_vars['SMA_50'].get() and len(data) >= 50:
+            sma50 = chart.create_line('SMA 50', color='#4ECDC4', width=2)
+            sma50_data = self.calculate_sma(data, 50)
+            sma50.set(sma50_data)
+            indicators_added.append('SMA 50')
+            
+        if self.indicator_vars['EMA_12'].get() and len(data) >= 12:
+            ema12 = chart.create_line('EMA 12', color='#45B7D1', width=2)
+            ema12_data = self.calculate_ema(data, 12)
+            ema12.set(ema12_data)
+            indicators_added.append('EMA 12')
+            
+        if self.indicator_vars['EMA_26'].get() and len(data) >= 26:
+            ema26 = chart.create_line('EMA 26', color='#F7DC6F', width=2)
+            ema26_data = self.calculate_ema(data, 26)
+            ema26.set(ema26_data)
+            indicators_added.append('EMA 26')
+            
+        if self.indicator_vars['Bollinger_Bands'].get() and len(data) >= 20:
+            bb_data = self.calculate_bollinger_bands(data, 20)
+            
+            bb_upper = chart.create_line('BB Upper', color='#9C27B0', width=1, style='dashed')
+            bb_upper.set(bb_data['upper'])
+            
+            bb_middle = chart.create_line('BB Middle', color='#9C27B0', width=1)
+            bb_middle.set(bb_data['middle'])
+            
+            bb_lower = chart.create_line('BB Lower', color='#9C27B0', width=1, style='dashed')
+            bb_lower.set(bb_data['lower'])
+            
+            indicators_added.append('Bollinger Bands')
+            
+        if self.indicator_vars['VWAP'].get():
+            vwap = chart.create_line('VWAP', color='#FFA726', width=2)
+            vwap_data = self.calculate_vwap(data)
+            vwap.set(vwap_data)
+            indicators_added.append('VWAP')
+        
+        # Add support/resistance levels based on recent highs/lows
+        recent_data = data.tail(100)  # Last 100 periods
+        resistance_level = recent_data['high'].max()
+        support_level = recent_data['low'].min()
+        
+        chart.horizontal_line(
+            resistance_level, 
+            color='#FF4444', 
+            width=2, 
+            style='dashed',
+            text=f'Resistance: {resistance_level:.2f}'
+        )
+        chart.horizontal_line(
+            support_level, 
+            color='#44FF44', 
+            width=2, 
+            style='dashed',
+            text=f'Support: {support_level:.2f}'
+        )
+        
+        self.log_message(f"Chart launched for {timeframe}")
+        if indicators_added:
+            self.log_message(f"Indicators added: {', '.join(indicators_added)}")
+            
+        # Store chart reference
+        self.charts[timeframe] = chart
+        
+        # Show chart
+        chart.show(block=False)
+        
+    def launch_multi_panel(self):
+        """Launch multi-panel chart with subcharts"""
+        symbol = self.symbol_var.get()
+        timeframe = self.timeframe_var.get()
+        
+        # Fetch data
+        data = self.fetch_data(symbol, timeframe)
+        if data is None:
+            return
+            
+        # Create main chart
+        chart = self.create_styled_chart(f"{symbol} Multi-Panel Analysis")
+        chart.set(data)
+        
+        # Add moving averages to main chart
+        sma20 = chart.create_line('SMA 20', color='#FF6B6B', width=2)
+        sma20_data = self.calculate_sma(data, 20)
+        sma20.set(sma20_data)
+        
+        # Create RSI subchart
+        if len(data) > 14:  # Ensure we have enough data for RSI
+            rsi_chart = chart.create_subchart(width=1, height=0.3, sync_crosshairs=True)
+            rsi_chart.layout(background_color='#131722', text_color='#d1d4dc')
+            rsi_chart.price_scale(scale_margin_top=0.1, scale_margin_bottom=0.1)
+            
+            rsi_line = rsi_chart.create_line('RSI', color='#9C27B0', width=2)
+            rsi_data = self.calculate_rsi(data)
+            rsi_line.set(rsi_data)
+            
+            # Add RSI levels
+            rsi_chart.horizontal_line(70, color='#FF4444', width=1, style='dashed', text='Overbought')
+            rsi_chart.horizontal_line(30, color='#44FF44', width=1, style='dashed', text='Oversold')
+            rsi_chart.horizontal_line(50, color='#FFFF44', width=1, style='dotted', text='Midline')
+        
+        # Create MACD subchart
+        if len(data) > 26:  # Ensure we have enough data for MACD
+            macd_chart = chart.create_subchart(width=1, height=0.3, sync_crosshairs=True)
+            macd_chart.layout(background_color='#131722', text_color='#d1d4dc')
+            
+            macd_data = self.calculate_macd(data)
+            
+            macd_line = macd_chart.create_line('MACD', color='#2196F3', width=2)
+            macd_line.set(macd_data['macd'])
+            
+            signal_line = macd_chart.create_line('Signal', color='#FF9800', width=2)
+            signal_line.set(macd_data['signal'])
+            
+            histogram = macd_chart.create_histogram('Histogram', color='#9E9E9E')
+            histogram.set(macd_data['histogram'])
+            
+            # Zero line
+            macd_chart.horizontal_line(0, color='#666666', width=1, style='dotted')
+        
+        self.log_message(f"Multi-panel chart launched for {symbol}")
+        chart.show(block=False)
+        
+    def on_timeframe_change(self, event):
+        """Handle timeframe change"""
+        self.current_timeframe = self.timeframe_var.get()
+        periods = self.timeframes[self.current_timeframe]
+        period_text = f"{periods:,} periods" if periods != -1 else "all data"
+        self.log_message(f"Timeframe changed to: {self.current_timeframe} ({period_text})")
+        
+    def run(self):
+        """Run the dashboard"""
+        if self.raw_data is None:
+            self.log_message("Error: Could not load data. Please check the CSV file path.")
+            messagebox.showerror("Error", "Could not load data. Please check the CSV file.")
+        else:
+            self.log_message("Dashboard ready - Select timeframe and launch charts!")
+        self.root.mainloop()
+
+def demo_csv_chart(csv_file='Latest file 1.csv'):
+    """Demo chart using CSV data"""
+    print("Creating chart from CSV data...")
     
-    return pd.DataFrame(data)
+    try:
+        # Load CSV data
+        if not os.path.exists(csv_file):
+            print(f"Error: CSV file '{csv_file}' not found!")
+            return
+            
+        data = pd.read_csv(csv_file)
+        
+        # Convert date and time to datetime
+        data['datetime'] = pd.to_datetime(
+            data['date'] + ' ' + data['time'], 
+            format='%d-%m-%Y %H:%M:%S'
+        )
+        
+        # Convert to Unix timestamp
+        data['time'] = data['datetime'].astype('int64') // 10**9
+        
+        # Rename columns and take last 1000 points for demo
+        data.rename(columns={'Volume': 'volume'}, inplace=True)
+        demo_data = data.tail(1000)[['time', 'open', 'high', 'low', 'close', 'volume']]
+        
+        # Create and configure chart
+        chart = Chart(toolbox=True)
+        
+        # Professional styling
+        chart.layout(
+            background_color='#131722',
+            text_color='#d1d4dc',
+            font_size=12,
+            font_family='Trebuchet MS'
+        )
+        
+        chart.candle_style(
+            up_color='#26a69a',
+            down_color='#ef5350',
+            border_up_color='#26a69a',
+            border_down_color='#ef5350',
+            wick_up_color='#26a69a',
+            wick_down_color='#ef5350'
+        )
+        
+        chart.volume_config(
+            up_color='rgba(38, 166, 154, 0.7)',
+            down_color='rgba(239, 83, 80, 0.7)'
+        )
+        
+        # Set data
+        chart.set(demo_data)
+        
+        # Add SMA
+        sma_data = pd.DataFrame({
+            'time': demo_data['time'],
+            'value': demo_data['close'].rolling(window=20).mean()
+        }).dropna()
+        
+        sma_line = chart.create_line('SMA 20', color='#FF6B6B', width=2)
+        sma_line.set(sma_data)
+        
+        # Add styling
+        chart.watermark('CSV Data Demo', color='rgba(180, 180, 240, 0.3)')
+        chart.legend(visible=True)
+        chart.crosshair(mode='normal', vert_color='#758696', horz_color='#758696')
+        
+        print(f"Demo chart created with {len(demo_data)} data points!")
+        print("Close the chart window to continue...")
+        chart.show(block=True)
+        
+    except Exception as e:
+        print(f"Error creating demo chart: {str(e)}")
 
-# -------------------------------
-# Sidebar
-# -------------------------------
-with st.sidebar:
-    uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
-
-# Load data
-df = load_data(uploaded_file)
-if df is None:
-    st.stop()
-
-# -------------------------------
-# TradingView Toolbar
-# -------------------------------
-current_price = df['close'].iloc[-1]
-prev_price = df['close'].iloc[-2] if len(df) > 1 else current_price
-price_change = current_price - prev_price
-price_change_pct = (price_change / prev_price) * 100 if prev_price != 0 else 0
-
-change_class = "positive" if price_change >= 0 else "negative"
-change_sign = "+" if price_change >= 0 else ""
-
-current_time = datetime.now().strftime("%H:%M:%S")
-
-st.markdown(f"""
-<div class="tv-toolbar">
-    <div class="tv-symbol-info">
-        <span class="tv-symbol">AAPL</span>
-        <span class="tv-price">{current_price:.2f}</span>
-        <span class="tv-change {change_class}">{change_sign}{price_change:.2f} {change_sign}{price_change_pct:.2f}%</span>
-    </div>
+if __name__ == "__main__":
+    print("Lightweight Charts Python Dashboard - CSV Data Source")
+    print("=====================================================")
+    print()
+    print("This dashboard uses your custom CSV file as the data source:")
+    print("- High-frequency 5-minute OHLC data")
+    print("- Multiple timeframe views")
+    print("- Technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands, VWAP)")
+    print("- Multi-panel charts with subcharts")
+    print("- Simulation mode for data progression")
+    print("- Professional TradingView-style interface")
+    print()
     
-    <div class="tv-timeframes">
-        <span class="tv-timeframe">1m</span>
-        <span class="tv-timeframe">5m</span>
-        <span class="tv-timeframe active">1h</span>
-        <span class="tv-timeframe">1D</span>
-        <span class="tv-timeframe">1W</span>
-    </div>
+    csv_file = 'Latest file 1.csv'
     
-    <div class="tv-time">{current_time}</div>
-</div>
-""", unsafe_allow_html=True)
-
-# -------------------------------
-# Create Multi-Panel Chart
-# -------------------------------
-# Filter to recent data for better visualization
-df_recent = df.tail(200).copy()
-df_recent['Date'] = df_recent['Datetime'].dt.strftime('%d %b')
-
-# Calculate RSI
-def calculate_rsi(prices, period=14):
-    delta = prices.diff()
-    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-df_recent['RSI'] = calculate_rsi(df_recent['close'])
-
-# Create subplot layout matching TradingView
-fig = make_subplots(
-    rows=3, cols=1,
-    shared_xaxes=True,
-    vertical_spacing=0.02,
-    row_heights=[0.7, 0.2, 0.1],
-    subplot_titles=('', '', '')
-)
-
-# TradingView color scheme
-tv_colors = {
-    'bg': '#0D1421',
-    'grid': '#1E2329',
-    'text': '#B2B5BE',
-    'green': '#02C076',
-    'red': '#FF4976',
-    'blue': '#2962FF',
-    'orange': '#FF8A00',
-    'purple': '#9C40FF'
-}
-
-# Main candlestick chart
-fig.add_trace(go.Candlestick(
-    x=df_recent['Date'],
-    open=df_recent['open'],
-    high=df_recent['high'],
-    low=df_recent['low'],
-    close=df_recent['close'],
-    name='',
-    increasing_line_color=tv_colors['green'],
-    decreasing_line_color=tv_colors['red'],
-    increasing_fillcolor=tv_colors['green'],
-    decreasing_fillcolor=tv_colors['red'],
-    line=dict(width=1),
-    showlegend=False
-), row=1, col=1)
-
-# Support and resistance lines
-current_high = df_recent['high'].max()
-current_low = df_recent['low'].min()
-support_level = current_low + (current_high - current_low) * 0.2
-resistance_level = current_high - (current_high - current_low) * 0.15
-
-fig.add_hline(y=support_level, line_dash="dot", line_color=tv_colors['green'], 
-             line_width=1, opacity=0.8, row=1, col=1)
-fig.add_hline(y=resistance_level, line_dash="dot", line_color=tv_colors['red'], 
-             line_width=1, opacity=0.8, row=1, col=1)
-
-# Volume bars
-volume_colors = []
-for i in range(len(df_recent)):
-    if df_recent['close'].iloc[i] >= df_recent['open'].iloc[i]:
-        volume_colors.append('rgba(2, 192, 118, 0.8)')
+    if not os.path.exists(csv_file):
+        print(f"Error: CSV file '{csv_file}' not found!")
+        print("Please ensure the CSV file is in the same directory as this script.")
+        choice = input("\nWould you like to see a demo with sample data instead? (y/n): ")
+        if choice.lower() == 'y':
+            # Create sample data for demo
+            dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='5T')
+            np.random.seed(42)
+            
+            data = []
+            price = 15000  # Starting price similar to your data
+            
+            for i, date in enumerate(dates):
+                if i >= 1000:  # Limit to 1000 points for demo
+                    break
+                    
+                change = np.random.normal(0, 10)
+                price += change
+                
+                open_price = price + np.random.normal(0, 5)
+                high_price = max(open_price, price) + abs(np.random.normal(0, 10))
+                low_price = min(open_price, price) - abs(np.random.normal(0, 10))
+                close_price = price + np.random.normal(0, 5)
+                volume = np.random.randint(0, 1000)
+                
+                data.append({
+                    'time': int(date.timestamp()),
+                    'open': round(open_price, 2),
+                    'high': round(high_price, 2),
+                    'low': round(low_price, 2),
+                    'close': round(close_price, 2),
+                    'volume': volume
+                })
+            
+            demo_df = pd.DataFrame(data)
+            chart = Chart(toolbox=True)
+            chart.layout(background_color='#131722', text_color='#d1d4dc')
+            chart.candle_style(up_color='#26a69a', down_color='#ef5350')
+            chart.set(demo_df)
+            chart.watermark('Sample Data Demo', color='rgba(180, 180, 240, 0.3)')
+            chart.legend(visible=True)
+            chart.show(block=True)
     else:
-        volume_colors.append('rgba(255, 73, 118, 0.8)')
-
-fig.add_trace(go.Bar(
-    x=df_recent['Date'],
-    y=df_recent['Volume'],
-    name='Volume',
-    marker_color=volume_colors,
-    showlegend=False
-), row=2, col=1)
-
-# RSI indicator
-fig.add_trace(go.Scatter(
-    x=df_recent['Date'],
-    y=df_recent['RSI'],
-    mode='lines',
-    name='RSI',
-    line=dict(color=tv_colors['purple'], width=2),
-    showlegend=False
-), row=3, col=1)
-
-# RSI reference lines
-fig.add_hline(y=70, line_dash="dash", line_color=tv_colors['text'], 
-             line_width=1, opacity=0.5, row=3, col=1)
-fig.add_hline(y=30, line_dash="dash", line_color=tv_colors['text'], 
-             line_width=1, opacity=0.5, row=3, col=1)
-
-# Layout styling to match TradingView exactly
-fig.update_layout(
-    plot_bgcolor=tv_colors['bg'],
-    paper_bgcolor=tv_colors['bg'],
-    font=dict(family="SF Pro Display, -apple-system, BlinkMacSystemFont", 
-              size=11, color=tv_colors['text']),
-    showlegend=False,
-    height=700,
-    margin=dict(l=0, r=60, t=0, b=0),
-    hovermode="x unified",
-    hoverlabel=dict(
-        bgcolor='rgba(30, 35, 41, 0.95)',
-        bordercolor=tv_colors['grid'],
-        font_size=11,
-        font_color=tv_colors['text']
-    ),
-    xaxis=dict(rangeslider=dict(visible=False))
-)
-
-# Update all axes
-for i in range(1, 4):
-    fig.update_xaxes(
-        showgrid=True,
-        gridcolor=tv_colors['grid'],
-        gridwidth=1,
-        showline=False,
-        tickfont=dict(size=10, color=tv_colors['text']),
-        showticklabels=(i == 3),
-        row=i, col=1
-    )
-    
-    fig.update_yaxes(
-        showgrid=True,
-        gridcolor=tv_colors['grid'],
-        gridwidth=1,
-        showline=False,
-        tickfont=dict(size=10, color=tv_colors['text']),
-        side='right',
-        row=i, col=1
-    )
-
-# Format specific axes
-fig.update_yaxes(tickformat='.2f', row=1, col=1)
-fig.update_yaxes(tickformat='.0s', row=2, col=1)
-fig.update_yaxes(range=[0, 100], tickformat='.0f', row=3, col=1)
-
-# Display the chart
-st.markdown('<div class="tv-chart-container">', unsafe_allow_html=True)
-st.plotly_chart(fig, use_container_width=True, config={
-    'displayModeBar': False,
-    'displaylogo': False,
-    'scrollZoom': True,
-    'doubleClick': 'reset+autosize'
-})
-st.markdown('</div>', unsafe_allow_html=True)
-
-# Add price labels and volume indicators as overlays
-st.markdown(f"""
-<div class="tv-volume-label">Vol {df_recent['Volume'].iloc[-1]:,.0f}</div>
-<div class="tv-price-labels">
-    <div class="tv-price-label">{resistance_level:.2f}</div>
-    <div class="tv-price-label" style="margin-top: 100px;">{current_price:.2f}</div>
-    <div class="tv-price-label" style="margin-top: 100px;">{support_level:.2f}</div>
-</div>
-""", unsafe_allow_html=True)
+        choice = input("\nChoose an option:\n1. Full Dashboard (GUI)\n2. Quick Chart Demo\nEnter choice (1 or 2): ")
+        
+        if choice == "2":
+            demo_csv_chart(csv_file)
+        else:
+            dashboard = FinancialDashboard(csv_file)
+            dashboard.run()
